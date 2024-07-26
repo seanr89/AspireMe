@@ -1,3 +1,5 @@
+using Microsoft.EntityFrameworkCore;
+
 var builder = WebApplication.CreateBuilder(args);
 
 // Add service defaults & Aspire components.
@@ -9,7 +11,10 @@ builder.AddNpgsqlDataSource("Todos");
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen();
 
-var app = builder.Build();
+builder.AddNpgsqlDbContext<AppDbContext>("postgresdb");
+builder.Services.AddScoped<CustomerService>();
+
+var app = builder.Build().MigrateDatabase();
 
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
@@ -18,27 +23,32 @@ if (app.Environment.IsDevelopment())
     app.UseSwaggerUI();
 }
 
-app.UseHttpsRedirection();
+// app.UseHttpsRedirection();
 
-var summaries = new[]
-{
-    "Freezing", "Bracing", "Chilly", "Cool", "Mild", "Warm", "Balmy", "Hot", "Sweltering", "Scorching"
-};
+app.MapGet("/", () =>{
+    app.Logger.LogInformation("Returning Hello!");
+    return Results.Text("Hello World!");
+});
 
-app.MapGet("/weatherforecast", () =>
+app.MapGet("/customers", async (AppDbContext context) => Results.Ok(await context.Customers.ToListAsync())).WithOpenApi();
+
+app.MapGet("/customers/{id}", async (Guid id, AppDbContext context) =>
 {
-    var forecast =  Enumerable.Range(1, 5).Select(index =>
-        new WeatherForecast
-        (
-            DateOnly.FromDateTime(DateTime.Now.AddDays(index)),
-            Random.Shared.Next(-20, 55),
-            summaries[Random.Shared.Next(summaries.Length)]
-        ))
-        .ToArray();
-    return forecast;
-})
-.WithName("GetWeatherForecast")
-.WithOpenApi();
+    var cust = await context.Customers.FindAsync(id);
+    return cust != null ? Results.Ok(cust) : Results.NotFound();
+});
+
+app.MapPost("/customers", async (AppDbContext context, Customer customer) =>
+{
+    context.Customers.Add(customer);
+    await context.SaveChangesAsync();
+    return Results.Created($"/customers/{customer.Id}", customer);
+});
+
+app.MapDefaultEndpoints();
+
+app.UseSwagger();
+app.UseSwaggerUI();
 
 app.Run();
 
